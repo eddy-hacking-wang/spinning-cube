@@ -6,37 +6,53 @@ from sympy.solvers import solve
 
 from utillibrary import *
 
+LARGE_VALUE = 50
+
 class RotatingCube(Scene):
     def construct(self):
         #Set up everything we need to draw the cube at a given angle
-        renderables, squareCenter, stationPoint, ellCenter, majorRadius, smallRadius = self.setUpRotation()
+        renderables, squareCenter, stationPoint, ellCenter, majorRadius, smallRadius= self.setUpRotation()
         horizon, centerAxis, enclosed, squareCenterDot, cvpdot, stationDot, lowerLine = renderables
-        #print(setup)
 
+        theta = ValueTracker(0.1)
 
-        squareInfo = self.drawSquare(squareCenter, 30, stationPoint, horizon,  ellCenter, majorRadius, smallRadius)
+        squareInfo = always_redraw(
+            lambda: self.drawCube(
+                    squareCenter,
+                    theta.get_value(), 
+                    stationPoint,
+                    horizon,
+                    ellCenter,
+                    majorRadius,
+                    smallRadius,
+                    stationPoint
+                )
+        )
 
-        self.add(renderables, squareInfo[0], squareInfo[1])
+        self.add(renderables, squareInfo)
+        self.wait(1)
+        self.play(theta.animate.set_value(89.9), rate_func=smooth, run_time=2)
+        self.wait(1)
 
     def setUpRotation(self):
         """Draws the ellipse responsible for maintaining the perspective of the cube at multiple angles by setting up the reference 45 degree perpendiculars, the reference diagonal, and the 45 degree square."""
 
         #Horizon and center axis
-        horizon = Line(LEFT * 8, RIGHT * 8, color=BLUE, stroke_width=0.5)
-        centerAxis = Line(UP*4, DOWN*4, stroke_width=0.5)
+        horizon = Line(LEFT * LARGE_VALUE, RIGHT * LARGE_VALUE, color=BLUE, stroke_width=0.5)
+        centerAxis = Line(UP*LARGE_VALUE, DOWN*LARGE_VALUE, stroke_width=0.5)
 
         #Central View Point
         cvp = self.intersectionTwoLines(horizon, centerAxis)
-        cvpdot = Dot(cvp, radius=0.04)
+        cvpdot = Dot(point_to_3d_like(cvp), radius=0.04)
 
         #Station point
         lowerLine = horizon.copy().shift(3.5*DOWN)
         stationPoint = self.intersectionTwoLines(centerAxis, lowerLine)
-        stationDot = Dot(stationPoint, radius=0.04)
+        stationDot = Dot(point_to_3d_like(stationPoint), radius=0.04)
 
-        enclosed, majorRadius, smallRadius, ellCenter, squareCenter = self.drawReferenceEllipse(horizon, centerAxis, lowerLine)
+        enclosed, majorRadius, smallRadius, ellCenter, squareCenter, v1, v2 = self.drawReferenceEllipse(horizon, centerAxis, lowerLine)
 
-        squareCenterDot = Dot(access_contents(squareCenter), radius=0.04)
+        squareCenterDot = Dot(point_to_3d_like(squareCenter), radius=0.04)
 
         renderables = VGroup(horizon, centerAxis, enclosed[0], squareCenterDot, cvpdot, stationDot, lowerLine)
 
@@ -50,64 +66,130 @@ class RotatingCube(Scene):
         v1line, v2line, bisector, angle = self.drawPerpendicular(station, theta)
 
         #Calculating horizon intersection points
-        v1 = self.intersectionTwoLines(horizon, v1line)
-        v2 = self.intersectionTwoLines(horizon, v2line)
+        v1 = self.intersectionTwoLines(horizon, v1line) #Right vanishing point
+        v2 = self.intersectionTwoLines(horizon, v2line) #Left vanishing point
         bisectorHorizon = self.intersectionTwoLines(horizon, bisector)
 
         #Finding diagonal of the rotated square
         bisectorHorizonX, bisectorHorizonY = get_x(bisectorHorizon), get_y(bisectorHorizon)
         squareCenterX, squareCenterY = get_x(squareCenter), get_y(squareCenter)
-        rotatedDiagonal = Line(access_contents(bisectorHorizon), Point([bisectorHorizonX + 500 * (squareCenterX-bisectorHorizonX), bisectorHorizonY + 500 * (squareCenterY-bisectorHorizonY), 0]))
+        rotatedDiagonal = Line(point_to_3d_like(bisectorHorizon), Point([bisectorHorizonX + LARGE_VALUE * (squareCenterX-bisectorHorizonX), bisectorHorizonY + LARGE_VALUE * (squareCenterY-bisectorHorizonY), 0]))
 
         # Intersection of rotated diagonal with ellipse
         q1, q2 = self.lineIntersectWithEllipse(rotatedDiagonal, squareCenter, origin, semiMajor, semiSmall)
 
         v1q1, v1q2, v2q1, v2q2 = self.drawVanishingLines(v1, v2, q1, q2)
 
-        q3 = self.intersectionTwoLines(v2q1, v1q2)
-        q4 = self.intersectionTwoLines(v1q1, v2q2)
+        q3 = self.intersectionTwoLines(v1q1, v2q2)
+        q4 = self.intersectionTwoLines(v2q1, v1q2)
 
-        return (Polygon(q1, q3, q2, q4), v1line, v2line, bisector, angle)
+        # Perpendiculars
+        perpendiculars = VGroup(v1line, v2line, bisector, angle).set_stroke(opacity=0.3)
+
+        return (Polygon(point_to_3d_like(q1), point_to_3d_like(q3), point_to_3d_like(q2), point_to_3d_like(q4), color=WHITE), perpendiculars, q1, q2, q3, q4, v1, v2)
+
+    def drawCube(self, squareCenter, theta, station, horizon, origin, semiMajor, semiSmall, vertex):
+        bottomSquareArt, perpendiculars, q1, q2, q3, q4, v1, v2 = self.drawSquare(squareCenter, theta, station, horizon, origin, semiMajor, semiSmall)
+        extraLines = self.drawExtraLines(v1, v2, vertex, q1, q2, q3, q4)
+
+        return VGroup(bottomSquareArt, perpendiculars, extraLines)
+
+    def drawExtraLines(self, v1, v2, vertex, q1, q2, q3, q4):
+        v2Tovertex = self.distance(v2, vertex)
+
+        eqPoint = Point([get_x(v2) + v2Tovertex, get_y(v2), 0])
+        oppositeCorner = q3 if self.distance(eqPoint, q3) > self.distance(eqPoint, q4) else q4
+
+        eqOpposite = self.drawRay(eqPoint, oppositeCorner)
+        bottomLine = self.drawRay(q2, Point([get_x(oppositeCorner), get_y(q2), 0]))
+
+        heightPoint = self.intersectionTwoLines(eqOpposite, bottomLine)
+        cubeHeight = self.distance(heightPoint, q2)
+
+        topCube = Point([get_x(q2), get_y(q2) + cubeHeight, 0])
+        cubeCornerLine = Line(q2, topCube)
+
+        # Finding the remaining points of the cube
+        v1Top = self.drawRay(v1, topCube)
+        v2Top = self.drawRay(v2, topCube)
+
+        q3Up = self.drawRay(q3, Point([get_x(q3), get_y(q3) + 1, 0]))
+        q4Up = self.drawRay(q4, Point([get_x(q4), get_y(q4) + 1, 0]))
+
+        q3Corner = self.intersectionTwoLines(v2Top, q3Up)
+        q4Corner = self.intersectionTwoLines(v1Top, q4Up)
+
+        v1q3corner = self.drawRay(v1, q3Corner)
+        v2q4corner = self.drawRay(v2, q4Corner)
+        q1Top = self.intersectionTwoLines(v1q3corner, v2q4corner)
+
+        v1q3 = self.drawRay(v1, q3)
+        v1q2 = self.drawRay(v1, q2)
+
+        v2q4 = self.drawRay(v2, q4)
+        v2q2 = self.drawRay(v2, q2)
+
+        vanishingLines = VGroup(v1q3, v1q2, v2q4, v2q2, v1Top, v2Top, v1q3corner, v2q4corner).set_stroke(opacity=0.3)
+
+        cubeTopLines = VGroup(cubeCornerLine, Line(q3Corner, topCube), Line(q4Corner, topCube), Line(q3Corner, q1Top), Line(q4Corner, q1Top), Line(q1, q1Top), Line(q3, q3Corner), Line(q4, q4Corner))
+
+        return VGroup(cubeTopLines, vanishingLines)
+        
+
+    def distance(self, p1, p2):
+        return math.sqrt((get_x(p1) - get_x(p2))**2 + (get_y(p1) - get_y(p2))**2)
 
     def drawVanishingLines(self, v1, v2, q1, q2):
         """Takes in the two vanishing points as well as the ends of the diagonal at which the vanishing lines should intersect.
         Returns the four lines created."""
-        v1Contents, v1x, v1y = access_contents(v1), get_x(v1), get_y(v1)
-        v2Contents, v2x, v2y = access_contents(v2), get_x(v2), get_y(v2)
+        v1x, v1y = get_x(v1), get_y(v1)
+        v2x, v2y = get_x(v2), get_y(v2)
 
         q1x, q1y = get_x(q1), get_y(q1)
         q2x, q2y = get_x(q2), get_y(q2)
 
-        v1q1 = Line(v1Contents, Point([v1x + 500 * (q1x-v1x), v1y + 500 * (q1y-v1y), 0]))
-        v1q2 = Line(v1Contents, Point([v1x + 500 * (q2x-v1x), v1y + 500 * (q2y-v1y), 0]))
-        v2q1 = Line(v2Contents, Point([v2x - 500 * (q1x-v2x), v2y + 500 * (q1y-v2y), 0]))
-        v2q2 = Line(v2Contents, Point([v2x - 500 * (q2x-v2x), v2y + 500 * (q2y-v2y), 0]))
+        v1q1 = self.drawRay(v1, q1)
+        v1q2 = self.drawRay(v1, q2)
+        v2q1 = self.drawRay(v2, q1)
+        v2q2 = self.drawRay(v2, q2)
 
         return (v1q1, v1q2, v2q1, v2q2)
 
     def lineIntersectWithEllipse(self, line, center, origin, semiMajor, semiSmall):
         """Takes the origin, major and minor axes of an ellipse (enough to form its equation) as well as a line, and
         calculates the intersection points of the line with the ellipse. Returns an array of points."""
-        intercept = center[1]
-        slope = self.calculateSlope(line.get_start(), center)
-        print(slope)
+        intercept = get_y(center)
+        slope = self.calculateSlope(Point(line.get_start()), center)
 
-        print(origin)
-        print(semiMajor)
-        print(semiSmall)
+        solution = None
 
-        x = Symbol("x")
-        solution = solve((x-origin[0])**2/(semiMajor)**2
-                        +((slope * x + intercept - origin[1])**2/(semiSmall)**2) - 1
-                         )
-        
-        print(solution)
+        if not slope:
+            # Vertical line
+            y = Symbol("y")
+            x = get_x(center)
+            solution = solve((x-get_x(origin))**2/(semiMajor)**2 
+                             +((y - get_y(origin))**2/(semiSmall)**2) - 1
+                             )
+            return sorted(list(map(lambda soln : Point([float(x), float(soln), 0]), solution)), key=lambda a: get_y(a), reverse=True)
+        else:
+            # Non-vertical line
+            x = Symbol("x")
+            solution = solve((x-get_x(origin))**2/(semiMajor)**2
+                            +((slope * x + intercept - get_y(origin))**2/(semiSmall)**2) - 1
+                            )
 
-        return list(map(lambda soln : Point(float(soln), float(slope * soln + intercept), 0), solution))
+            return sorted(list(map(lambda soln : Point([float(soln), float(slope * soln + intercept), 0]), solution)), key=lambda a: get_y(a), reverse=True)
 
+    def drawRay(self, vertex, intersection):
+        xVertex, yVertex = get_x(vertex), get_y(vertex)
+        xIntersection, yIntersection = get_x(intersection), get_y(intersection)
 
+        return Line(vertex, Point([xVertex + LARGE_VALUE * (xIntersection - xVertex), yVertex + LARGE_VALUE * (yIntersection - yVertex), 0]))
         
     def calculateSlope(self, point1, point2):
+        if get_x(point1) == get_x(point2):
+            return None
+
         return (get_y(point1)-get_y(point2))/(get_x(point1)-get_x(point2))
 
     def drawPerpendicular(self, vertex, theta):
@@ -116,14 +198,9 @@ class RotatingCube(Scene):
 
         rad = theta * math.pi/180
 
-        print("vertex is:")
-        print(vertex)
-
-        print(get_y(vertex))
-
-        v1line = Line(vertex, Point([get_x(vertex) + 500 * math.cos(rad), get_y(vertex) + 500 * math.sin(rad), 0]))
-        v2line = Line(vertex, Point([get_x(vertex) - 500 * math.sin(rad), get_y(vertex) + 500 * math.cos(rad), 0]))
-        bisector = Line(vertex, Point([get_x(vertex) + 500 * math.cos(rad + math.pi/4), get_y(vertex) + 500 * math.sin(rad + math.pi/4), 0]))
+        v1line = Line(vertex, Point([get_x(vertex) + LARGE_VALUE * math.cos(rad), get_y(vertex) + LARGE_VALUE * math.sin(rad), 0]))
+        v2line = Line(vertex, Point([get_x(vertex) - LARGE_VALUE * math.sin(rad), get_y(vertex) + LARGE_VALUE * math.cos(rad), 0]))
+        bisector = Line(vertex, Point([get_x(vertex) + LARGE_VALUE * math.cos(rad + math.pi/4), get_y(vertex) + LARGE_VALUE * math.sin(rad + math.pi/4), 0]))
         angle = RightAngle(v1line, v2line)
 
         return VGroup(v1line, v2line, bisector, angle)
@@ -140,13 +217,10 @@ class RotatingCube(Scene):
 
         center = self.intersectionTwoLines(horizon, centerAxis)
 
-        print("The center is:")
-        print(center)
-
         #Reference diagonal for the bottom square
-        diagonal = Line(Point([get_x(center), get_y(center) - 1, 0]), Point([get_x(center), get_y(center) - 2, 0]), color=RED) #Diagonal of the bottom square
-        q1 = diagonal.get_start() #Far edge of the 45 degree cube
-        q2 = diagonal.get_end()   #Near edge of the 45 degree cube
+        diagonal = Line(Point([get_x(center), get_y(center) - 1, 0]), Point([get_x(center), get_y(center) - 2, 0])) #Diagonal of the bottom square
+        q1 = Point(diagonal.get_start()) #Far edge of the 45 degree cube
+        q2 = Point(diagonal.get_end())   #Near edge of the 45 degree cube
 
         #Lines from vanishing point to q1 and q2
         v1q1, v1q2, v2q1, v2q2 = self.drawVanishingLines(v1, v2, q1, q2)
@@ -155,17 +229,14 @@ class RotatingCube(Scene):
         q3 = self.intersectionTwoLines(v2q1, v1q2)
         q4 = self.intersectionTwoLines(v1q1, v2q2)
 
-        oppDiagonal = Line(access_contents(q3), access_contents(q4))
+        oppDiagonal = Line(point_to_3d_like(q3), point_to_3d_like(q4))
         squareCenter = self.intersectionTwoLines(diagonal, oppDiagonal)
-        ellCenter = midpoint(q1, q2)
+        ellCenter = Point(midpoint(point_to_3d_like(q1), point_to_3d_like(q2)))
 
         ellipse, majorRadius, smallRadius = self.drawEllipseAroundKite(q1, q2, q3, q4)
         enclosed = ellipse.move_to(ellCenter)
 
-        print("Enclosed ellipse is:")
-        print(enclosed)
-
-        return (enclosed, majorRadius, smallRadius, ellCenter, squareCenter)
+        return (enclosed, majorRadius, smallRadius, ellCenter, squareCenter, v1, v2)
 
 
     def intersectionTwoLines(self, l1, l2):
@@ -173,7 +244,8 @@ class RotatingCube(Scene):
             [l1.get_start()], [l1.get_vector()],
             [l2.get_start()], [l2.get_vector()]
         )
-        return toReturn;
+
+        return Point(toReturn[0]);
     
     def drawEllipseAroundKite(self, q1, q2, q3, q4):
         """Draws an ellipse around the kite formed by the points q1, q2, q3, and q4, where q1q2 and q3q4 are the diagonals of the kite, and the ellipse's axes are parallel to these
@@ -198,6 +270,6 @@ class RotatingCube(Scene):
         
         majorRadius = math.sqrt(smallRadius**2 + solution[0]**2)
 
-        ellipse = Ellipse(2*majorRadius, 2*smallRadius)
+        ellipse = Ellipse(2*majorRadius, 2*smallRadius, color="WHITE").set_stroke(opacity=0.3)
 
         return (ellipse, majorRadius, smallRadius)

@@ -6,5 +6,6 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "manim>=0.20.1",
+    "numpy>=2.5.1",
     "sympy>=1.14.0",
 ]
